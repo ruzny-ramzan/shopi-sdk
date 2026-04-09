@@ -62,8 +62,9 @@ const promo = await shop.checkout.validatePromo({
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
-| `apiKey` | `string` | ✅ | Your Storefront API key |
-| `baseUrl` | `string` | ❌ | Override API URL |
+| `apiKey` | `string` | ✅ | Your Storefront API key (must start with `shopi_pk_`) |
+| `baseUrl` | `string` | ❌ | Override API URL (default: `https://apicall.shopi.lk/v1`) |
+| `timeoutMs` | `number` | ❌ | Request timeout in ms (default: `10000`) |
 
 ### Methods
 
@@ -96,6 +97,18 @@ try {
 } catch (error) {
   if (error instanceof ShopiError) {
     console.error(error.message, error.status);
+    // error.status === 408 → request timed out
+    // error.status === 0   → network error (offline, DNS failure)
+    // error.status === 401 → invalid API key
+    // error.status === 404 → resource not found
   }
 }
 ```
+
+## Reliability
+
+The SDK includes built-in reliability features:
+
+- **Automatic retries** — transient `5xx` and `429` responses are retried up to 2 times with exponential backoff (300ms, 600ms).
+- **Request timeouts** — every request is cancelled after 10 seconds by default. Override with `timeoutMs` in config.
+- **Safe JSON parsing** — if the server returns a non-JSON body (e.g. an HTML error page from a gateway), a typed `ShopiError` is thrown instead of a raw `SyntaxError`.
