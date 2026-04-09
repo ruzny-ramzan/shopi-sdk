@@ -23,24 +23,44 @@ import type {
 
 export * from "./types";
 
-const DEFAULT_BASE_URL =
-  "https://bdpvfwfftaepqjvnnkwv.supabase.co/functions/v1/storefront-api/v1";
+const DEFAULT_BASE_URL = "https://apicall.shopi.lk/v1";
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+const MAX_RETRIES = 2;
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class Shopi {
   private apiKey: string;
   private baseUrl: string;
+  private timeoutMs: number;
 
   constructor(config: ShopiConfig) {
-    if (!config.apiKey) throw new Error("apiKey is required");
-    this.apiKey = config.apiKey;
+    if (!config.apiKey || typeof config.apiKey !== "string") {
+      throw new Error("apiKey is required and must be a string");
+    }
+    const trimmed = config.apiKey.trim();
+    if (!trimmed.startsWith("shopi_pk_")) {
+      throw new Error('apiKey must start with "shopi_pk_"');
+    }
+    this.apiKey = trimmed;
     this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
+    this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   private async request<T>(
     path: string,
-    options: { method?: string; body?: unknown; params?: Record<string, string | number | undefined> } = {}
+    options: {
+      method?: string;
+      body?: unknown;
+      params?: Record<string, string | number | undefined>;
+      _retryCount?: number;
+    } = {}
   ): Promise<T> {
-    const { method = "GET", body, params } = options;
+    const { method = "GET", body, params, _retryCount = 0 } = options;
     let url = `${this.baseUrl}/${path}`;
 
     if (params) {
@@ -52,25 +72,68 @@ export class Shopi {
       if (qs) url += `?${qs}`;
     }
 
-    const res = await fetch(url, {
-      method,
-      headers: {
-        "X-Shopi-Api-Key": this.apiKey,
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new ShopiError(data.error || "Request failed", res.status, data);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: {
+          "X-Shopi-Api-Key": this.apiKey,
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+    } catch (err: unknown) {
+      clearTimeout(timer);
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new ShopiError(
+          `Request timed out after ${this.timeoutMs}ms`,
+          408
+        );
+      }
+      throw new ShopiError(
+        err instanceof Error ? err.message : "Network error",
+        0
+      );
+    } finally {
+      clearTimeout(timer);
     }
+
+    // Retry on transient server errors with exponential backoff
+    if (RETRYABLE_STATUSES.has(res.status) && _retryCount < MAX_RETRIES) {
+      const delay = 2 ** _retryCount * 300; // 300ms, 600ms
+      await sleep(delay);
+      return this.request<T>(path, { ...options, _retryCount: _retryCount + 1 });
+    }
+
+    // Safe JSON parse — server may return HTML on gateway errors
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      throw new ShopiError(
+        `Unexpected server response (status ${res.status})`,
+        res.status
+      );
+    }
+
+    if (!res.ok) {
+      const errData = data as Record<string, unknown>;
+      throw new ShopiError(
+        typeof errData?.error === "string" ? errData.error : "Request failed",
+        res.status,
+        data
+      );
+    }
+
     return data as T;
   }
 
   // ── Shop ───────────────────────────────────────────────────────────────
 
-  /** Get shop info */
   async getShop(): Promise<Shop> {
     const res = await this.request<{ shop: Shop }>("shop");
     return res.shop;
@@ -79,16 +142,16 @@ export class Shopi {
   // ── Products ───────────────────────────────────────────────────────────
 
   products = {
-    /** List products with optional filters */
     list: async (params?: ProductListParams): Promise<ProductListResponse> => {
       return this.request<ProductListResponse>("products", {
         params: params as Record<string, string | number | undefined>,
       });
     },
 
-    /** Get a single product by slug */
     getBySlug: async (slug: string): Promise<Product> => {
-      const res = await this.request<{ product: Product }>(`products/${encodeURIComponent(slug)}`);
+      const res = await this.request<{ product: Product }>(
+        `products/${encodeURIComponent(slug)}`
+      );
       return res.product;
     },
   };
@@ -104,15 +167,19 @@ export class Shopi {
 
   // ── Store Settings ─────────────────────────────────────────────────────
 
-  /** Get store settings (name, logo, shipping, social links, etc.) */
   async getStoreSettings(): Promise<StoreSettings> {
-    const res = await this.request<{ settings: StoreSettings }>("store-settings");
+    const res = await this.request<{ settings: StoreSettings }>(
+      "store-settings"
+    );
     return res.settings;
   }
 
   // ── Payment Methods ────────────────────────────────────────────────────
 
-  async getPaymentMethods(): Promise<{ payment_methods: PaymentMethod[]; bank_details: BankDetail[] }> {
+  async getPaymentMethods(): Promise<{
+    payment_methods: PaymentMethod[];
+    bank_details: BankDetail[];
+  }> {
     return this.request("payment-methods");
   }
 
@@ -124,7 +191,9 @@ export class Shopi {
       return res.pages;
     },
     getBySlug: async (slug: string): Promise<Page> => {
-      const res = await this.request<{ page: Page }>(`pages/${encodeURIComponent(slug)}`);
+      const res = await this.request<{ page: Page }>(
+        `pages/${encodeURIComponent(slug)}`
+      );
       return res.page;
     },
   };
@@ -132,13 +201,17 @@ export class Shopi {
   // ── Blog ───────────────────────────────────────────────────────────────
 
   blog = {
-    list: async (params?: BlogListParams): Promise<{ posts: BlogPost[]; total: number }> => {
+    list: async (
+      params?: BlogListParams
+    ): Promise<{ posts: BlogPost[]; total: number }> => {
       return this.request("blogs", {
         params: params as Record<string, string | number | undefined>,
       });
     },
     getBySlug: async (slug: string): Promise<BlogPost> => {
-      const res = await this.request<{ post: BlogPost }>(`blogs/${encodeURIComponent(slug)}`);
+      const res = await this.request<{ post: BlogPost }>(
+        `blogs/${encodeURIComponent(slug)}`
+      );
       return res.post;
     },
   };
@@ -146,14 +219,13 @@ export class Shopi {
   // ── Reviews ────────────────────────────────────────────────────────────
 
   reviews = {
-    /** Get reviews for a product */
     list: async (productId: string, limit?: number): Promise<Review[]> => {
-      const res = await this.request<{ reviews: Review[] }>(`reviews/${encodeURIComponent(productId)}`, {
-        params: limit ? { limit } : undefined,
-      });
+      const res = await this.request<{ reviews: Review[] }>(
+        `reviews/${encodeURIComponent(productId)}`,
+        { params: limit ? { limit } : undefined }
+      );
       return res.reviews;
     },
-    /** Submit a review (requires approval by seller) */
     submit: async (params: SubmitReviewParams): Promise<{ id: string }> => {
       const res = await this.request<{ review: { id: string } }>("reviews", {
         method: "POST",
@@ -165,22 +237,32 @@ export class Shopi {
 
   // ── Discounts ──────────────────────────────────────────────────────────
 
-  async getDiscounts(): Promise<{ shop_wide: Discount[]; product_specific: Discount[] }> {
-    const res = await this.request<{ shop_wide_discounts: Discount[]; product_discounts: Discount[] }>("discounts");
-    return { shop_wide: res.shop_wide_discounts, product_specific: res.product_discounts };
+  async getDiscounts(): Promise<{
+    shop_wide: Discount[];
+    product_specific: Discount[];
+  }> {
+    const res = await this.request<{
+      shop_wide_discounts: Discount[];
+      product_discounts: Discount[];
+    }>("discounts");
+    return {
+      shop_wide: res.shop_wide_discounts,
+      product_specific: res.product_discounts,
+    };
   }
 
   // ── Theme Settings ─────────────────────────────────────────────────────
 
   async getThemeSettings(): Promise<ThemeSettings | null> {
-    const res = await this.request<{ theme: ThemeSettings | null }>("theme-settings");
+    const res = await this.request<{ theme: ThemeSettings | null }>(
+      "theme-settings"
+    );
     return res.theme;
   }
 
   // ── Checkout / Orders ──────────────────────────────────────────────────
 
   checkout = {
-    /** Create an order */
     createOrder: async (params: CreateOrderParams): Promise<Order> => {
       const res = await this.request<{ order: Order }>("orders", {
         method: "POST",
@@ -188,8 +270,9 @@ export class Shopi {
       });
       return res.order;
     },
-    /** Validate a promo code */
-    validatePromo: async (params: PromoValidateParams): Promise<PromoValidateResult> => {
+    validatePromo: async (
+      params: PromoValidateParams
+    ): Promise<PromoValidateResult> => {
       return this.request<PromoValidateResult>("promo/validate", {
         method: "POST",
         body: params,
