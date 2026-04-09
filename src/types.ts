@@ -1,10 +1,12 @@
 // ── Configuration ────────────────────────────────────────────────────────────
 
 export interface ShopiConfig {
-  /** Your Storefront API key (starts with shopi_pk_) */
+  /** Your Storefront API key (must start with shopi_pk_) */
   apiKey: string;
-  /** Override the API base URL (default: https://bdpvfwfftaepqjvnnkwv.supabase.co/functions/v1/storefront-api/v1) */
+  /** Override the API base URL (default: https://apicall.shopi.lk/v1) */
   baseUrl?: string;
+  /** Request timeout in milliseconds (default: 10000) */
+  timeoutMs?: number;
 }
 
 // ── Shop ─────────────────────────────────────────────────────────────────────
