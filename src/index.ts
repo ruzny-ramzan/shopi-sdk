@@ -33,10 +33,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export interface RateLimitState {
+  /** Maximum requests allowed per window */
+  limit: number;
+  /** Requests remaining in the current window */
+  remaining: number;
+  /** Unix timestamp (seconds) when the window resets */
+  reset: number;
+}
+
 export class Shopi {
   private apiKey: string;
   private baseUrl: string;
   private timeoutMs: number;
+
+  /** Populated after every request — reflects the current rate-limit window. */
+  public rateLimit: RateLimitState | null = null;
 
   constructor(config: ShopiConfig) {
     if (!config.apiKey || typeof config.apiKey !== "string") {
@@ -103,10 +115,27 @@ export class Shopi {
     }
 
     // Retry on transient server errors with exponential backoff
+    // For 429, honour Retry-After header from worker if present
     if (RETRYABLE_STATUSES.has(res.status) && _retryCount < MAX_RETRIES) {
-      const delay = 2 ** _retryCount * 300; // 300ms, 600ms
+      let delay = 2 ** _retryCount * 300; // 300ms, 600ms default
+      if (res.status === 429) {
+        const retryAfter = res.headers.get("Retry-After");
+        if (retryAfter) delay = Math.min(parseInt(retryAfter, 10) * 1000, 10_000);
+      }
       await sleep(delay);
       return this.request<T>(path, { ...options, _retryCount: _retryCount + 1 });
+    }
+
+    // Capture rate-limit state from worker response headers
+    const rlLimit     = res.headers.get("X-RateLimit-Limit");
+    const rlRemaining = res.headers.get("X-RateLimit-Remaining");
+    const rlReset     = res.headers.get("X-RateLimit-Reset");
+    if (rlLimit && rlRemaining && rlReset) {
+      this.rateLimit = {
+        limit:     parseInt(rlLimit, 10),
+        remaining: parseInt(rlRemaining, 10),
+        reset:     parseInt(rlReset, 10),
+      };
     }
 
     // Safe JSON parse — server may return HTML on gateway errors
