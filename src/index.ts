@@ -5,6 +5,15 @@ import type {
   ProductListParams,
   ProductListResponse,
   Category,
+  Listing,
+  ListingListParams,
+  ListingListResponse,
+  RentalItem,
+  RentalItemListParams,
+  RentalItemListResponse,
+  Service,
+  ServiceListParams,
+  ServiceListResponse,
   StoreSettings,
   PaymentMethod,
   BankDetail,
@@ -191,6 +200,57 @@ export class Shopi {
     list: async (): Promise<Category[]> => {
       const res = await this.request<{ categories: Category[] }>("categories");
       return res.categories;
+    },
+  };
+
+  // ── Listings ──────────────────────────────────────────────────────────
+
+  listings = {
+    list: async (params?: ListingListParams): Promise<ListingListResponse> => {
+      return this.request<ListingListResponse>("listings", {
+        params: params as Record<string, string | number | undefined>,
+      });
+    },
+
+    getBySlug: async (slug: string): Promise<Listing> => {
+      const res = await this.request<{ listing: Listing }>(
+        `listings/${encodeURIComponent(slug)}`
+      );
+      return res.listing;
+    },
+  };
+
+  // ── Rental Items ──────────────────────────────────────────────────────
+
+  rentalItems = {
+    list: async (params?: RentalItemListParams): Promise<RentalItemListResponse> => {
+      return this.request<RentalItemListResponse>("rental-items", {
+        params: params as Record<string, string | number | undefined>,
+      });
+    },
+
+    getBySlug: async (slug: string): Promise<RentalItem> => {
+      const res = await this.request<{ rental_item: RentalItem }>(
+        `rental-items/${encodeURIComponent(slug)}`
+      );
+      return res.rental_item;
+    },
+  };
+
+  // ── Services ──────────────────────────────────────────────────────────
+
+  services = {
+    list: async (params?: ServiceListParams): Promise<ServiceListResponse> => {
+      return this.request<ServiceListResponse>("services", {
+        params: params as Record<string, string | number | undefined>,
+      });
+    },
+
+    getBySlug: async (slug: string): Promise<Service> => {
+      const res = await this.request<{ service: Service }>(
+        `services/${encodeURIComponent(slug)}`
+      );
+      return res.service;
     },
   };
 
