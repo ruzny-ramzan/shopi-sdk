@@ -74,6 +74,139 @@ export interface Category {
   image_url: string | null;
 }
 
+// ── Listings (Showcase / Lead-Gen) ──────────────────────────────────────────
+
+export interface Listing {
+  id: string;
+  shop_id?: string;
+  name: string;
+  slug: string | null;
+  description: string | null;
+  price: number | null;
+  price_label: string | null;
+  currency: string | null;
+  category: string | null;
+  condition: string | null;
+  location: string | null;
+  images: string[] | null;
+  video: string | null;
+  features: string[] | null;
+  specifications: Record<string, any> | null;
+  contact_info: Record<string, any> | null;
+  availability_status: string | null;
+  is_featured: boolean | null;
+  views_count: number | null;
+  inquiries_count: number | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListingListParams {
+  category?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+  sort_by?: "created_at" | "name" | "price" | "views_count" | "updated_at" | "sort_order";
+  sort_order?: "asc" | "desc";
+}
+
+export interface ListingListResponse {
+  listings: Listing[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ── Rental Items ────────────────────────────────────────────────────────────
+
+export interface RentalItem {
+  id: string;
+  shop_id?: string;
+  name: string;
+  slug: string | null;
+  description: string | null;
+  category: string | null;
+  condition: string | null;
+  location: string | null;
+  images: string[] | null;
+  video: string | null;
+  specifications: Record<string, any> | null;
+  currency: string | null;
+  hourly_rate: number | null;
+  daily_rate: number | null;
+  weekly_rate: number | null;
+  monthly_rate: number | null;
+  deposit_required: boolean | null;
+  deposit_amount: number | null;
+  min_rental_duration_hours: number | null;
+  max_rental_duration_days: number | null;
+  total_quantity: number | null;
+  available_quantity: number | null;
+  pickup_available: boolean | null;
+  delivery_available: boolean | null;
+  delivery_fee: number | null;
+  is_featured: boolean | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RentalItemListParams {
+  category?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+  sort_by?: "created_at" | "name" | "daily_rate" | "updated_at" | "sort_order";
+  sort_order?: "asc" | "desc";
+}
+
+export interface RentalItemListResponse {
+  rental_items: RentalItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ── Services (Appointments / Bookings) ──────────────────────────────────────
+
+export interface Service {
+  id: string;
+  shop_id?: string;
+  name: string;
+  slug: string | null;
+  description: string | null;
+  price: number;
+  currency: string | null;
+  category: string | null;
+  duration_minutes: number;
+  images: string[] | null;
+  deposit_required: boolean | null;
+  deposit_amount: number | null;
+  max_bookings_per_slot: number | null;
+  buffer_before_minutes: number | null;
+  buffer_after_minutes: number | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceListParams {
+  category?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+  sort_by?: "created_at" | "name" | "price" | "sort_order" | "updated_at";
+  sort_order?: "asc" | "desc";
+}
+
+export interface ServiceListResponse {
+  services: Service[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 // ── Store Settings ───────────────────────────────────────────────────────────
 
 export interface StoreSettings {
