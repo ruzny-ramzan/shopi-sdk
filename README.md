@@ -1,17 +1,17 @@
-# @shopi/storefront-sdk
+# @shopi-lk/storefront-sdk
 
-Official Shopi Storefront SDK for building custom e-commerce storefronts.
+Official Shopi.lk Storefront SDK for building custom e-commerce storefronts.
 
 ## Install
 
 ```bash
-npm install @shopi/storefront-sdk
+npm install @shopi-lk/storefront-sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { Shopi } from '@shopi/storefront-sdk';
+import { Shopi } from '@shopi-lk/storefront-sdk';
 
 const shop = new Shopi({
   apiKey: 'shopi_pk_your_api_key_here',
