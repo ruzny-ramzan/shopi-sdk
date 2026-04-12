@@ -1,6 +1,6 @@
 {
   "name": "@shopi-lk/storefront-sdk",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Official Shopi.lk Storefront SDK — access products, cart, checkout, and theme settings for custom storefronts",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
