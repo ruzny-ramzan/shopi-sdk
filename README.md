@@ -43,14 +43,28 @@ const product = await shopi.products.getBySlug('iphone-15-pro');
 // Get all categories
 const categories = await shopi.categories.list();
 
-// Create an order
+// Calculate shipping fee BEFORE creating the order (weight + region aware)
+const ship = await shopi.shipping.calculate({
+  items: [{ product_id: 'uuid-here', quantity: 1 }], // weight resolved from DB
+  subtotal: 450000,
+  destination_country: 'LK',
+});
+console.log(ship.fee, ship.method, ship.reason);
+// e.g. 350, "domestic", "Domestic tier 0–1000g"
+
+// Create an order — pass shipping_fee + shipping_region from the call above
 const order = await shopi.checkout.createOrder({
   customer_name: 'John Doe',
   customer_email: 'john@example.com',
+  customer_phone: '+94771234567',
   items: [
     { product_id: 'uuid-here', name: 'iPhone 15 Pro', price: 450000, quantity: 1 },
   ],
+  shipping_address: { line1: '123 Main St', city: 'Colombo', postal_code: '00100' },
+  shipping_fee: ship.fee,
+  shipping_region: ship.region_key ?? undefined,
   payment_method: 'cod',
+  currency: ship.currency, // optional, defaults to shop currency
 });
 
 // Validate a promo code
@@ -164,6 +178,99 @@ await shopi.reviews.submit({
 const { shop_wide, product_specific } = await shopi.getDiscounts();
 ```
 
+// Active discounts
+const { shop_wide, product_specific } = await shopi.getDiscounts();
+```
+
+## Shipping (Profile + Weight-Based Calculation)
+
+The shop's seller configures shipping in their Shopi dashboard (free shipping,
+free-over-threshold, flat domestic, weight-tiered domestic, or per-region
+international). Use `shipping.calculate` to get the correct fee for the cart
+**before** calling `checkout.createOrder` — pass the same fee back into the
+order so the customer is charged correctly.
+
+```typescript
+// 1. Calculate the fee
+const ship = await shopi.shipping.calculate({
+  items: [
+    { product_id: 'prod-uuid-1', quantity: 2 },             // weight resolved server-side
+    { product_id: 'prod-uuid-2', quantity: 1, weight_g: 750 }, // explicit override
+  ],
+  subtotal: 12500,
+  destination_country: 'LK', // ISO code; defaults to "LK"
+});
+
+// ship returns:
+// {
+//   fee: 450,
+//   method: "domestic",       // "free" | "threshold_free" | "domestic" | "international"
+//   reason: "Domestic tier 1001–2000g",
+//   region_key: null,
+//   region_name: null,
+//   cart_weight_g: 1750,
+//   currency: "LKR",
+//   breakdown: { base_fee: 450, extra_weight_g: 0, steps: 0, additional_fee: 0, final_shipping: 450 },
+//   error: null,
+// }
+
+// 2. Pass shipping_fee + shipping_region into the order
+await shopi.checkout.createOrder({
+  customer_name: 'Ruzny',
+  customer_email: 'ruzny@example.com',
+  items: [/* same items with name + price */],
+  shipping_address: { line1: '…', city: 'Colombo' },
+  shipping_fee: ship.fee,
+  shipping_region: ship.region_key ?? undefined,
+  payment_method: 'cod',
+});
+```
+
+**Notes**
+- `weight_g` per item is optional. If omitted, the server reads `weight` from `products_public` (in grams).
+- If shipping is unavailable for the destination, `fee` will be `0` and `error` will explain why — surface it to the customer.
+- Free-shipping and free-over-threshold rules are evaluated automatically.
+
+## Customer Auth, Profile & Order History
+
+Shopi uses **email-based passwordless auth** (no password, no Supabase Auth user
+required). Send a 6-digit code, verify it, then read/update the customer's
+profile and list their orders for THIS shop.
+
+```typescript
+// 1. Send a 6-digit code to the customer's email
+await shopi.customer.sendVerification('jane@example.com');
+
+// 2. Verify the code the user types in
+const result = await shopi.customer.verifyCode('jane@example.com', '482910');
+if (result.error) {
+  // wrong / expired code
+}
+
+// 3. Read profile (name + avatar). Returns null if no profile yet.
+const profile = await shopi.customer.getProfile('jane@example.com');
+
+// 4. Create or update the profile
+await shopi.customer.upsertProfile({
+  email: 'jane@example.com',
+  name: 'Jane Doe',
+  avatar_url: 'https://cdn.shopi.lk/customer-uploads/jan***doe@example.com-…jpg',
+});
+
+// 5. List the customer's orders for this shop
+const orders = await shopi.customer.listOrders('jane@example.com');
+orders.forEach(o => {
+  console.log(o.id, o.status, o.total_amount, o.currency);
+});
+```
+
+**Recommended flow for a "My Account / Orders" page**
+1. Persist the verified email in `localStorage` (e.g. `shopi_customer_email`).
+2. On page load, call `customer.getProfile(email)` and `customer.listOrders(email)` in parallel.
+3. To "log out", just clear the stored email.
+
+Verification codes expire after 10 minutes. Re-sending a code within 60 seconds is rate-limited.
+
 ## API Reference
 
 ### `new Shopi(config)`
@@ -198,8 +305,14 @@ const { shop_wide, product_specific } = await shopi.getDiscounts();
 | `reviews.submit(params)` | `checkout:write` | Submit a review |
 | `getDiscounts()` | `products:read` | Active discounts |
 | `getThemeSettings()` | `shop:read` | Theme colors, fonts, sections |
-| `checkout.createOrder(params)` | `checkout:write` | Place an order |
+| `checkout.createOrder(params)` | `checkout:write` | Place an order (pass `shipping_fee` from `shipping.calculate`) |
 | `checkout.validatePromo(params)` | `checkout:write` | Validate promo code |
+| `shipping.calculate(params)` | `checkout:write` | Calculate shipping fee from cart + destination |
+| `customer.sendVerification(email)` | `customer:write` | Email a 6-digit verification code |
+| `customer.verifyCode(email, code)` | `customer:write` | Verify the 6-digit code |
+| `customer.getProfile(email)` | `customer:read` | Get customer name + avatar |
+| `customer.upsertProfile(params)` | `customer:write` | Create/update customer profile |
+| `customer.listOrders(email)` | `customer:read` | List customer's orders for THIS shop |
 
 ### List Parameters
 
@@ -264,4 +377,6 @@ API keys can be scoped to limit access. Use `*` for full access or combine speci
 | `rentals:read` | Rental items |
 | `services:read` | Services |
 | `content:read` | Pages, blog posts |
-| `checkout:write` | Orders, promo validation, review submission |
+| `checkout:write` | Orders, promo validation, review submission, shipping calculation |
+| `customer:read` | Read customer profile + their order history |
+| `customer:write` | Send/verify codes, create/update customer profile |
