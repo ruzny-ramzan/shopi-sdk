@@ -28,6 +28,11 @@ import type {
   PromoValidateParams,
   PromoValidateResult,
   SubmitReviewParams,
+  ShippingCalculateParams,
+  ShippingResult,
+  CustomerProfile,
+  CustomerOrder,
+  VerifyCodeResult,
 } from "./types";
 
 export * from "./types";
@@ -366,6 +371,70 @@ export class Shopi {
         method: "POST",
         body: params,
       });
+    },
+  };
+
+  // ── Shipping ───────────────────────────────────────────────────────────
+
+  shipping = {
+    /**
+     * Calculate shipping fee for a cart based on the shop's configured
+     * shipping rules (free, weight-tiered, or weight-based domestic/international).
+     * Server resolves missing item weights from products_public.
+     */
+    calculate: async (params: ShippingCalculateParams): Promise<ShippingResult> => {
+      return this.request<ShippingResult>("shipping/calculate", {
+        method: "POST",
+        body: params,
+      });
+    },
+  };
+
+  // ── Customer (Shopi email-based auth + profile + order history) ───────
+
+  customer = {
+    /** Send a 6-digit verification code to the customer's email. */
+    sendVerification: async (email: string): Promise<{ ok?: boolean; error?: string }> => {
+      return this.request("customer/send-verification", {
+        method: "POST",
+        body: { email },
+      });
+    },
+
+    /** Verify the 6-digit code emailed to the customer. */
+    verifyCode: async (email: string, code: string): Promise<VerifyCodeResult> => {
+      return this.request<VerifyCodeResult>("customer/verify-code", {
+        method: "POST",
+        body: { email, code },
+      });
+    },
+
+    /** Fetch the customer's profile (name, avatar). Returns null if not found. */
+    getProfile: async (email: string): Promise<CustomerProfile | null> => {
+      const res = await this.request<{ profile: CustomerProfile | null }>(
+        "customer/profile",
+        { params: { email } },
+      );
+      return res.profile;
+    },
+
+    /** Create or update the customer's profile (name, avatar_url). */
+    upsertProfile: async (
+      params: { email: string; name?: string; avatar_url?: string | null },
+    ): Promise<{ ok?: boolean; error?: string }> => {
+      return this.request("customer/profile", {
+        method: "POST",
+        body: params,
+      });
+    },
+
+    /** List the customer's orders for THIS shop only. */
+    listOrders: async (email: string): Promise<CustomerOrder[]> => {
+      const res = await this.request<{ orders: CustomerOrder[] }>(
+        "customer/orders",
+        { params: { email } },
+      );
+      return res.orders;
     },
   };
 }
