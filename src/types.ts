@@ -333,12 +333,21 @@ export interface CreateOrderParams {
   customer_email: string;
   customer_phone?: string;
   items: CartItem[];
-  shipping_address?: Record<string, any>;
-  shipping_method?: string;
+  /** Object or string. Stringified when stored. */
+  shipping_address?: Record<string, any> | string;
+  /** Shipping fee from /shipping/calculate (added on top of items subtotal). */
+  shipping_fee?: number;
+  /** Region key/name returned by /shipping/calculate (e.g. "LK", "EU"). */
+  shipping_region?: string;
   payment_method?: string;
+  /** Uploaded bank-transfer receipt URL, if applicable. */
+  payment_proof_url?: string;
   notes?: string;
-  promo_code_id?: string;
   discount_amount?: number;
+  /** ISO currency, defaults to shop currency on the server. */
+  currency?: string;
+  /** Optional Supabase auth user id, if you have one. */
+  user_id?: string;
 }
 
 export interface Order {
@@ -380,4 +389,69 @@ export interface SubmitReviewParams {
   customer_name?: string;
   customer_email?: string;
   image_url?: string;
+}
+
+// ── Shipping ─────────────────────────────────────────────────────────────────
+
+export interface ShippingCalcCartItem {
+  product_id: string;
+  quantity: number;
+  /** Optional override; otherwise resolved from products_public.weight (grams) */
+  weight_g?: number;
+}
+
+export interface ShippingCalculateParams {
+  items: ShippingCalcCartItem[];
+  subtotal: number;
+  /** ISO country code, e.g. "LK", "US". Defaults to "LK". */
+  destination_country?: string;
+}
+
+export interface ShippingBreakdown {
+  base_fee: number;
+  extra_weight_g: number;
+  steps: number;
+  additional_fee: number;
+  final_shipping: number;
+}
+
+export interface ShippingResult {
+  fee: number;
+  method: "free" | "threshold_free" | "domestic" | "international";
+  reason: string;
+  region_key: string | null;
+  region_name: string | null;
+  cart_weight_g: number;
+  currency: string;
+  breakdown: ShippingBreakdown | null;
+  error: string | null;
+}
+
+// ── Customer (Shopi email-based auth) ───────────────────────────────────────
+
+export interface CustomerProfile {
+  name: string | null;
+  email: string;
+  avatar_url: string | null;
+}
+
+export interface CustomerOrder {
+  id: string;
+  status: string;
+  total_amount: number;
+  currency: string | null;
+  items: any;
+  shipping_fee: number | null;
+  shipping_region: string | null;
+  shipping_address: string | null;
+  payment_method: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VerifyCodeResult {
+  verified?: boolean;
+  ok?: boolean;
+  error?: string;
+  [k: string]: unknown;
 }
