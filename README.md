@@ -271,6 +271,225 @@ orders.forEach(o => {
 
 Verification codes expire after 10 minutes. Re-sending a code within 60 seconds is rate-limited.
 
+---
+
+## Customer Profile & Checkout Autofill
+
+Shopi's native storefront auto-creates a profile after the first order, autofills
+the checkout form on subsequent visits, and locks the email field once verified
+so every order ties back to the same customer. You can replicate this exact
+behavior in any SDK-powered storefront — **no extra endpoints required**.
+
+### How it works
+
+1. **First order** → save customer details (name, email, phone, shipping address)
+   to `localStorage` AND call `customer.upsertProfile()` to persist server-side.
+2. **Returning visit** → read `localStorage`, autofill the checkout form.
+3. **Email verified** → mark email as verified locally and render the email
+   input as read-only. All future orders for this email show up in
+   `customer.listOrders(email)`.
+
+### Storage shape (recommended)
+
+```typescript
+// localStorage key: 'shopi_customer_profile'
+interface LocalCustomerProfile {
+  name: string;
+  email: string;
+  phone: string;
+  shippingAddress: string;
+  shippingRegion: string;
+  avatarUrl?: string;
+  isEmailVerified: boolean;
+}
+```
+
+### Complete React example
+
+```tsx
+import { useEffect, useState } from 'react';
+import { Shopi } from '@shopi-lk/storefront-sdk';
+
+const shopi = new Shopi({ apiKey: 'shopi_pk_…' });
+const PROFILE_KEY = 'shopi_customer_profile';
+
+interface LocalProfile {
+  name: string;
+  email: string;
+  phone: string;
+  shippingAddress: string;
+  shippingRegion: string;
+  avatarUrl?: string;
+  isEmailVerified: boolean;
+}
+
+const empty: LocalProfile = {
+  name: '', email: '', phone: '',
+  shippingAddress: '', shippingRegion: '',
+  isEmailVerified: false,
+};
+
+const readProfile = (): LocalProfile => {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    return raw ? { ...empty, ...JSON.parse(raw) } : empty;
+  } catch { return empty; }
+};
+const writeProfile = (p: LocalProfile) =>
+  localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+
+export function CheckoutForm({ cart, subtotal }: { cart: any[]; subtotal: number }) {
+  const [form, setForm] = useState<LocalProfile>(empty);
+  const [submitting, setSubmitting] = useState(false);
+
+  // 1. Autofill from localStorage on mount
+  useEffect(() => {
+    const saved = readProfile();
+    setForm(saved);
+
+    // Hydrate latest name/avatar from server if email is verified
+    if (saved.isEmailVerified && saved.email) {
+      shopi.customer.getProfile(saved.email).then((server) => {
+        if (server) {
+          setForm((f) => ({
+            ...f,
+            name: server.name || f.name,
+            avatarUrl: server.avatar_url || f.avatarUrl,
+          }));
+        }
+      });
+    }
+  }, []);
+
+  // 2. Email verification — locks the email field once verified
+  async function verifyEmail() {
+    await shopi.customer.sendVerification(form.email);
+    const code = window.prompt('Enter the 6-digit code sent to your email');
+    if (!code) return;
+    const res = await shopi.customer.verifyCode(form.email, code);
+    if (res.error) { alert('Invalid or expired code'); return; }
+
+    const verified = { ...form, isEmailVerified: true };
+    setForm(verified);
+    writeProfile(verified);
+  }
+
+  // 3. Place order, then persist profile (local + server)
+  async function placeOrder(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const order = await shopi.orders.create({
+        customer_name: form.name,
+        customer_email: form.email,
+        customer_phone: form.phone,
+        shipping_address: form.shippingAddress,
+        shipping_region: form.shippingRegion,
+        items: cart,
+        subtotal,
+        payment_method: 'cod',
+      });
+
+      // Save locally so the next visit autofills
+      writeProfile(form);
+
+      // Auto-create / update server-side profile so future orders
+      // surface in customer.listOrders(email) under one identity.
+      await shopi.customer.upsertProfile({
+        email: form.email,
+        name: form.name,
+      });
+
+      window.location.href = `/order/${order.id}`;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const emailLocked = form.isEmailVerified;
+
+  return (
+    <form onSubmit={placeOrder}>
+      <input
+        placeholder="Full name" required
+        value={form.name}
+        onChange={(e) => setForm({ ...form, name: e.target.value })}
+      />
+
+      <div>
+        <input
+          type="email" placeholder="Email" required
+          value={form.email}
+          readOnly={emailLocked}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+        />
+        {emailLocked
+          ? <span>✓ Verified</span>
+          : <button type="button" onClick={verifyEmail}>Verify email</button>}
+      </div>
+
+      <input
+        placeholder="Phone" required
+        value={form.phone}
+        onChange={(e) => setForm({ ...form, phone: e.target.value })}
+      />
+      <textarea
+        placeholder="Shipping address" required
+        value={form.shippingAddress}
+        onChange={(e) => setForm({ ...form, shippingAddress: e.target.value })}
+      />
+      <input
+        placeholder="Region (e.g. Colombo)" required
+        value={form.shippingRegion}
+        onChange={(e) => setForm({ ...form, shippingRegion: e.target.value })}
+      />
+
+      <button type="submit" disabled={submitting}>
+        {submitting ? 'Placing order…' : 'Place order'}
+      </button>
+    </form>
+  );
+}
+```
+
+### "My Orders" page (uses the same email)
+
+```tsx
+export function MyOrders() {
+  const { email, isEmailVerified } = readProfile();
+  const [orders, setOrders] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!email || !isEmailVerified) return;
+    shopi.customer.listOrders(email).then(setOrders);
+  }, [email]);
+
+  if (!isEmailVerified) {
+    return <p>Verify your email at checkout to see your past orders.</p>;
+  }
+  return (
+    <ul>
+      {orders.map((o) => (
+        <li key={o.id}>#{o.id.slice(0, 8)} — {o.status} — {o.currency} {o.total_amount}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Notes & best practices
+
+- **Email is the customer key.** All orders placed with the same email — across
+  sessions, devices, even before verification — link to the same profile and
+  appear in `customer.listOrders(email)`.
+- **Lock email after verification** so users don't accidentally split their
+  order history across multiple emails.
+- **Verification is optional** for checkout — but required to view past orders
+  on a "My Orders" page.
+- **Avatars:** host the image on your own storage/CDN and pass the URL to
+  `customer.upsertProfile({ avatar_url })`.
+- **Logout:** `localStorage.removeItem('shopi_customer_profile')`.
+
 ## API Reference
 
 ### `new Shopi(config)`
