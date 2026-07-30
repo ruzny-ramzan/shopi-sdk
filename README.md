@@ -95,6 +95,46 @@ console.log(listing.availability_status); // e.g. "available"
 console.log(listing.features);           // e.g. ["18K Gold", "0.5ct Diamond"]
 console.log(listing.contact_info);       // e.g. { phone: "+94...", whatsapp: "..." }
 console.log(listing.views_count);        // e.g. 342
+
+// Record a view (increments views_count, shown in the seller dashboard)
+// Safe to call from a component effect: it never throws and de-duplicates
+// per browser session.
+await shopi.listings.trackView(listing.slug ?? listing.id);
+```
+
+#### Tracking listing views
+
+`views_count` is what the seller's dashboard shows as **Total Views**, and what
+you render as "X people viewed this". It only increases when your storefront
+tells Shopi a view happened.
+
+| | |
+|---|---|
+| SDK method | `listings.trackView(slugOrId, { force? })` |
+| Endpoint | `POST /v1/listings/:slugOrId/view` |
+| Scope | `listings:read` |
+| Returns | `number \| null` — the new `views_count`, or `null` if skipped/failed |
+
+Behaviour:
+- **Never throws.** Failures resolve to `null`, so a tracking outage can never break your page.
+- **De-duplicated per browser session** via `sessionStorage` key `shopi_viewed_listing_<slugOrId>`. Pass `{ force: true }` to always count.
+- Accepts either the listing **slug** or **id**.
+
+```tsx
+import { useEffect, useState } from 'react';
+
+function ListingPage({ listing }) {
+  const [views, setViews] = useState(listing.views_count);
+
+  useEffect(() => {
+    // Count once per session, then reflect the fresh number in the UI
+    shopi.listings.trackView(listing.slug ?? listing.id).then((count) => {
+      if (count !== null) setViews(count);
+    });
+  }, [listing.id]);
+
+  return <p>{views} people viewed this</p>;
+}
 ```
 
 ### Rental (Vehicle / Equipment Rental)
@@ -173,10 +213,6 @@ await shopi.reviews.submit({
   customer_name: 'Jane',
   customer_email: 'jane@example.com',
 });
-
-// Active discounts
-const { shop_wide, product_specific } = await shopi.getDiscounts();
-```
 
 // Active discounts
 const { shop_wide, product_specific } = await shopi.getDiscounts();
@@ -510,6 +546,7 @@ export function MyOrders() {
 | `categories.list()` | `products:read` | All product categories |
 | `listings.list(params?)` | `listings:read` | List listings with filters & pagination |
 | `listings.getBySlug(slug)` | `listings:read` | Single listing by slug |
+| `listings.trackView(slugOrId, opts?)` | `listings:read` | Record a listing view (`POST /listings/:slugOrId/view`), session-deduped |
 | `rentalItems.list(params?)` | `rentals:read` | List rental items with filters & pagination |
 | `rentalItems.getBySlug(slug)` | `rentals:read` | Single rental item by slug |
 | `services.list(params?)` | `services:read` | List services with filters & pagination |
