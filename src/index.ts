@@ -134,7 +134,12 @@ export class Shopi {
       let delay = 2 ** _retryCount * 300; // 300ms, 600ms default
       if (res.status === 429) {
         const retryAfter = res.headers.get("Retry-After");
-        if (retryAfter) delay = Math.min(parseInt(retryAfter, 10) * 1000, 10_000);
+        if (retryAfter) {
+          const parsed = parseInt(retryAfter, 10);
+          if (!Number.isNaN(parsed) && parsed > 0) {
+            delay = Math.min(parsed * 1000, 10_000);
+          }
+        }
       }
       await sleep(delay);
       return this.request<T>(path, { ...options, _retryCount: _retryCount + 1 });
