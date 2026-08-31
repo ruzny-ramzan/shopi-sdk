@@ -455,3 +455,9 @@ export interface VerifyCodeResult {
   error?: string;
   [k: string]: unknown;
 }
+
+// ── Listing View Tracking ──────────────────────────────────────────────────
+
+export interface TrackViewResult {
+  views_count: number | null;
+}

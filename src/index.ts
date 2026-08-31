@@ -33,6 +33,7 @@ import type {
   CustomerProfile,
   CustomerOrder,
   VerifyCodeResult,
+  TrackViewResult,
 } from "./types";
 
 export * from "./types";
@@ -227,6 +228,37 @@ export class Shopi {
         `listings/${encodeURIComponent(slug)}`
       );
       return res.listing;
+    },
+
+    /**
+     * Record a view for a listing. Increments `views_count` on the server.
+     *
+     * - Never throws — failures resolve to `null` so a tracking outage
+     *   cannot break the page.
+     * - De-duplicated per browser session via `sessionStorage`.
+     *   Pass `{ force: true }` to always count.
+     * - Accepts either the listing **slug** or **id**.
+     *
+     * @returns The new `views_count`, or `null` if skipped/failed.
+     */
+    trackView: async (
+      slugOrId: string,
+      opts?: { force?: boolean }
+    ): Promise<number | null> => {
+      const key = `shopi_viewed_listing_${slugOrId}`;
+      try {
+        if (typeof sessionStorage !== "undefined" && !opts?.force) {
+          if (sessionStorage.getItem(key)) return null;
+          sessionStorage.setItem(key, "1");
+        }
+        const res = await this.request<TrackViewResult>(
+          `listings/${encodeURIComponent(slugOrId)}/view`,
+          { method: "POST" }
+        );
+        return res.views_count ?? null;
+      } catch {
+        return null;
+      }
     },
   };
 
